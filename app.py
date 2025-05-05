@@ -29,25 +29,37 @@ if not OTP_LOG_PATH.exists():
 
 # --- FUNCTIONS ---
 def get_audio_duration(wav_data):
-    with wave.open(io.BytesIO(wav_data), 'rb') as wf:
-        frames = wf.getnframes()
-        rate = wf.getframerate()
-        duration = frames / float(rate)
-        return round(duration, 2)
+    try:
+        with wave.open(io.BytesIO(wav_data), 'rb') as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            duration = frames / float(rate)
+            return round(duration, 2)
+    except Exception as e:
+        st.error(f"Failed to calculate audio duration: {e}")
+        return 0
 
 def send_otp(recipient_email, otp):
-    yag = yagmail.SMTP(EMAIL, APP_PASSWORD)
-    yag.send(to=recipient_email, subject="Your OTP for Kath Bath Login", contents=f"Your OTP is: {otp}")
+    try:
+        yag = yagmail.SMTP(EMAIL, APP_PASSWORD)
+        yag.send(to=recipient_email, subject="Your OTP for Kath Bath Login", contents=f"Your OTP is: {otp}")
+    except Exception as e:
+        st.error(f"Failed to send OTP: {e}")
+        raise
 
 def upload_to_drive(file_path, filename):
-    creds = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_FILE, scopes=["https://www.googleapis.com/auth/drive"]
-    )
-    service = build('drive', 'v3', credentials=creds)
-    file_metadata = {'name': filename, 'parents': [GDRIVE_FOLDER_ID]}
-    media = MediaFileUpload(file_path, resumable=True)
-    uploaded = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return uploaded.get("id")
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            CREDENTIALS_FILE, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        service = build('drive', 'v3', credentials=creds)
+        file_metadata = {'name': filename, 'parents': [GDRIVE_FOLDER_ID]}
+        media = MediaFileUpload(file_path, resumable=True)
+        uploaded = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        return uploaded.get("id")
+    except Exception as e:
+        st.error(f"Failed to upload to Google Drive: {e}")
+        raise
 
 # --- SESSION STATE ---
 if "user" not in st.session_state:
@@ -92,7 +104,8 @@ if not st.session_state.user:
 
                 # Update OTP log
                 otp_df = otp_df[otp_df["email"] != email_clean]
-                otp_df = otp_df.append({"email": email_clean, "last_sent": now}, ignore_index=True)
+                new_entry = pd.DataFrame({"email": [email_clean], "last_sent": [now]})
+                otp_df = pd.concat([otp_df, new_entry], ignore_index=True)
                 otp_df.to_csv(OTP_LOG_PATH, index=False)
 
             except Exception as e:
@@ -161,10 +174,10 @@ if submit and wav_audio_data:
         filename = f"{language}_{region}_{unique_id}.wav"
         temp_path = TEMP_DIR / filename
 
-        with open(temp_path, "wb") as f:
-            f.write(wav_audio_data)
-
         try:
+            with open(temp_path, "wb") as f:
+                f.write(wav_audio_data)
+
             gdrive_id = upload_to_drive(temp_path, filename)
             st.success(f"✅ Uploaded to Google Drive (ID: {gdrive_id})")
 
@@ -184,11 +197,16 @@ if submit and wav_audio_data:
 
             if DB_PATH.exists():
                 df = pd.read_csv(DB_PATH)
-                df = df.append(metadata, ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([metadata])], ignore_index=True)
             else:
                 df = pd.DataFrame([metadata])
 
             df.to_csv(DB_PATH, index=False)
             st.success("✅ Submission complete!")
+
         except Exception as e:
-            st.error(f"❌ Upload failed: {e}")
+            st.error(f"❌ Submission failed: {e}")
+        finally:
+            # Clean up temp file
+            if temp_path.exists():
+                temp_path.unlink()
