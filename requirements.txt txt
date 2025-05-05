@@ -1,5 +1,5 @@
 streamlit
-streamlit-audiorec
+git+https://github.com/stefanrmmr/streamlit_audio_recorder
 pandas
 google-auth
 google-auth-oauthlib
