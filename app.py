@@ -10,6 +10,7 @@ import uuid
 import wave
 import io
 import random
+import time
 import yagmail
 from EMAIL_CONFIG import EMAIL, APP_PASSWORD
 from verified_users import VERIFIED_EMAILS
@@ -18,8 +19,13 @@ from verified_users import VERIFIED_EMAILS
 TEMP_DIR = Path("temp")
 TEMP_DIR.mkdir(exist_ok=True)
 DB_PATH = Path("submission_metadata.csv")
-GDRIVE_FOLDER_ID = "YOUR_GOOGLE_DRIVE_FOLDER_ID"  # Replace with your actual folder ID
+OTP_LOG_PATH = Path("otp_log.csv")
+GDRIVE_FOLDER_ID = "YOUR_GOOGLE_DRIVE_FOLDER_ID"  # Replace this
 CREDENTIALS_FILE = "creds.json"
+
+# --- INIT OTP LOG ---
+if not OTP_LOG_PATH.exists():
+    pd.DataFrame(columns=["email", "last_sent"]).to_csv(OTP_LOG_PATH, index=False)
 
 # --- FUNCTIONS ---
 def get_audio_duration(wav_data):
@@ -43,7 +49,7 @@ def upload_to_drive(file_path, filename):
     uploaded = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     return uploaded.get("id")
 
-# --- SESSION STATES ---
+# --- SESSION STATE ---
 if "user" not in st.session_state:
     st.session_state.user = None
     st.session_state.otp_sent = False
@@ -58,16 +64,37 @@ if not st.session_state.user:
     if not st.session_state.otp_sent:
         email_input = st.text_input("Enter your email:")
         if st.button("Send OTP"):
-            if email_input.lower() not in VERIFIED_EMAILS:
+            email_clean = email_input.strip().lower()
+
+            if email_clean not in VERIFIED_EMAILS:
                 st.error("❌ This email is not authorized.")
                 st.stop()
+
+            # Global rate limit check
+            otp_df = pd.read_csv(OTP_LOG_PATH)
+            now = time.time()
+            if email_clean in otp_df["email"].values:
+                last_time = otp_df.loc[otp_df["email"] == email_clean, "last_sent"].values[0]
+                time_diff = now - float(last_time)
+                if time_diff < 60:
+                    remaining = int(60 - time_diff)
+                    st.warning(f"⏳ Wait {remaining} seconds before requesting new OTP.")
+                    st.stop()
+
+            # Send OTP
             otp = str(random.randint(100000, 999999))
             try:
-                send_otp(email_input, otp)
+                send_otp(email_clean, otp)
                 st.session_state.generated_otp = otp
-                st.session_state.email = email_input
+                st.session_state.email = email_clean
                 st.session_state.otp_sent = True
                 st.success("✅ OTP sent to your verified email.")
+
+                # Update OTP log
+                otp_df = otp_df[otp_df["email"] != email_clean]
+                otp_df = otp_df.append({"email": email_clean, "last_sent": now}, ignore_index=True)
+                otp_df.to_csv(OTP_LOG_PATH, index=False)
+
             except Exception as e:
                 st.error(f"Failed to send OTP: {e}")
         st.stop()
@@ -96,7 +123,7 @@ with st.expander("📊 View Submission Dashboard"):
 
 # --- VIDEO ---
 st.markdown("### 🎬 Watch the Video")
-st.video("https://www.youtube.com/watch?v=dQw4w9WgXcQ")  # Replace with your video
+st.video("https://www.youtube.com/watch?v=dQw4w9WgXcQ")  # Replace with your actual video
 
 # --- RECORD AUDIO ---
 st.markdown("### 🎙️ Record Your Response (30–59 seconds)")
@@ -125,7 +152,7 @@ with st.form("metadata_form"):
     mic = st.radio("Mic Type", ["Built-in", "External"])
     submit = st.form_submit_button("📤 Submit")
 
-# --- SUBMISSION LOGIC ---
+# --- SUBMIT LOGIC ---
 if submit and wav_audio_data:
     if not (30 <= audio_duration <= 59):
         st.error("Recording must be between 30 and 59 seconds.")
