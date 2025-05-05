@@ -1,0 +1,7 @@
+streamlit
+streamlit-audiorec
+pandas
+google-auth
+google-auth-oauthlib
+google-api-python-client
+yagmail
