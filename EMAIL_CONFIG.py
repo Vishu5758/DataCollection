@@ -1,2 +1,2 @@
-EMAIL = "your-gmail@gmail.com"
-APP_PASSWORD = "your-app-password"  # App password, not regular Gmail password
+EMAIL = "iitmdisha@gmail.com"
+APP_PASSWORD = "rdkb ivwf zmaa powo"  # App password, not regular Gmail password
